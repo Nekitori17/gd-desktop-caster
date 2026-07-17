@@ -1,0 +1,35 @@
+[package]
+name = "gd-desktop-caster"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+godot = { version = "0.5", features = ["experimental-threads"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = ">=0.60, <=0.62", features = [
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+screencapturekit = "1.5"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13", features = ["pipewire"] }
+pipewire = "0.9"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+strip = "debuginfo"
+
+[profile.dev]
+opt-level = 1

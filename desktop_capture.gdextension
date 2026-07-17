@@ -1,0 +1,9 @@
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.3
+reloadable = false
+
+[libraries]
+windows.x86_64 = "res://addons/desktop_capture/bin/gd-desktop-caster.windows.x86_64.dll"
+macos.universal = "res://addons/desktop_capture/bin/libgd-desktop-caster.macos.universal.dylib"
+linux.x86_64 = "res://addons/desktop_capture/bin/libgd-desktop-caster.linux.x86_64.so"
