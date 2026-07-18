@@ -3,23 +3,16 @@ use ashpd::desktop::screencast::{CursorMode, Screencast, SelectSourcesOptions, S
 use std::sync::mpsc;
 use std::time::Duration;
 
-// Note: pipewire-rs 0.9+ split MainLoop/Context/Stream into Rc-suffixed
-// (shared-ownership) and Box-suffixed (unique-ownership) variants; the bare
-// names no longer have a `new()` of their own. We construct the Rc variants
-// and rely on Deref to keep using the plain-type methods (.loop_(), .connect(), etc).
-// `spa` is re-exported by the pipewire crate itself (pipewire::spa), not a
-// separate top-level dependency.
+// pipewire-rs 0.9+ uses *Rc variants (shared-ownership) instead of unique ones.
+// `spa` is re-exported directly via `pipewire::spa`.
 use pipewire::context::ContextRc;
 use pipewire::main_loop::MainLoopRc;
-// `pipewire::properties` is a *module*; the `properties!` macro of the same
-// name lives inside it and must be imported explicitly, or `use pipewire::properties;`
-// below will shadow the macro with the module.
+// Explicitly import macro to avoid shadowing by the `pipewire::properties` module.
 use pipewire::properties::properties;
 use pipewire::spa::utils::Direction;
 use pipewire::stream::{StreamFlags, StreamRc};
 
-/// Status message sent from worker thread to ensure stream connects 
-/// successfully before `init()` returns.
+/// Status message to sync the worker thread startup with `init()`.
 enum WorkerStartup {
     Ready,
     Failed(String),
@@ -69,8 +62,7 @@ impl CaptureBackend for PipeWireCaptureBackend {
         let pw_thread = std::thread::Builder::new()
             .name("pw-capture".into())
             .spawn(move || {
-                // Safely handle setup errors by reporting via `startup_tx`
-                // instead of panicking on this detached thread.
+                // Report errors via `startup_tx` instead of panicking on this thread.
                 macro_rules! try_setup {
                     ($expr:expr, $context:literal) => {
                         match $expr {
@@ -94,7 +86,7 @@ impl CaptureBackend for PipeWireCaptureBackend {
                     "Failed to create PipeWire context"
                 );
 
-                // Connect using portal FD. `connect_fd_rc` takes ownership of the fd.
+                // `connect_fd_rc` takes ownership of the fd.
                 let core = try_setup!(
                     context.connect_fd_rc(pw_fd, None),
                     "Failed to connect to PipeWire via portal FD"
@@ -111,7 +103,6 @@ impl CaptureBackend for PipeWireCaptureBackend {
                     "Failed to create PipeWire stream"
                 );
 
-                // Quit receiver
                 let loop_clone = mainloop.clone();
                 let _receiver = quit_receiver.attach(&mainloop.loop_(), move |_| {
                     loop_clone.quit();
@@ -126,25 +117,25 @@ impl CaptureBackend for PipeWireCaptureBackend {
                             if let Some(mut buffer) = stream.dequeue_buffer() {
                                 let datas = buffer.datas_mut();
                                 if let Some(data) = datas.first_mut() {
-                                    if let Some(map) = data.data_mut() {
-                                        // Ensure buffer matches expected size 
-                                        // before publishing to avoid corrupted frames.
+                                    // Renamed to `data()` in pipewire 0.9.
+                                    if let Some(map) = data.data() {
+                                        // Validate buffer size before processing.
                                         if map.len() == buffer_size {
                                             let mut out = vec![0u8; buffer_size];
                                             for (d, s) in
                                                 out.chunks_exact_mut(4).zip(map.chunks_exact(4))
                                             {
-                                                // Assuming BGRx -> RGBA.
-                                                d[0] = s[2]; // R <- B
+                                                // Convert BGRx -> RGBA.
+                                                d[0] = s[2]; // R
                                                 d[1] = s[1]; // G
-                                                d[2] = s[0]; // B <- R
-                                                d[3] = 255; // A
+                                                d[2] = s[0]; // B
+                                                d[3] = 255;  // A
                                             }
                                             let _ = tx.try_send(out);
                                         }
                                     }
                                 }
-                                stream.queue_buffer(buffer);
+                                // pipewire 0.9+: Buffer auto-queues back on Drop.
                             }
                         })
                         .register(),
@@ -171,7 +162,7 @@ impl CaptureBackend for PipeWireCaptureBackend {
             })
             .map_err(|e| format!("Failed to spawn PipeWire thread: {e}"))?;
 
-        // Wait for worker thread to confirm connection or report failure.
+        // Wait for worker thread initialization outcome.
         match startup_rx.recv() {
             Ok(WorkerStartup::Ready) => {}
             Ok(WorkerStartup::Failed(reason)) => {
@@ -232,7 +223,6 @@ impl CaptureBackend for PipeWireCaptureBackend {
         match result {
             Ok(frame) => {
                 if frame.len() != expected_len {
-                    // Guard against mismatched frame sizes.
                     return Err(CaptureError::Reinitialize(format!(
                         "PipeWire frame has {} bytes; expected {expected_len}",
                         frame.len()
@@ -252,7 +242,6 @@ impl CaptureBackend for PipeWireCaptureBackend {
         }
         if let Some(thread) = self.pw_thread.take() {
             if let Err(payload) = thread.join() {
-                // Log worker thread panic during shutdown.
                 eprintln!(
                     "[DesktopCapture] PipeWire worker thread panicked during shutdown: {}",
                     describe_panic_payload(&payload)
@@ -262,7 +251,7 @@ impl CaptureBackend for PipeWireCaptureBackend {
     }
 }
 
-/// Extracts human-readable panic message from thread join payload.
+/// Extracts a human-readable panic message from the thread join payload.
 fn describe_panic_payload(payload: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {
         (*message).to_owned()
