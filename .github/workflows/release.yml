@@ -1,0 +1,100 @@
+name: Build and Release GDExtension
+
+on:
+  push:
+    tags:
+      - 'v*' # Run automatically when a new tag like v1.0.0 is pushed
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows.release.x86_64
+            os_name: windows
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: linux.release.x86_64
+            os_name: linux
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: macos.release.universal
+            os_name: macos
+
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux Dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libx11-dev
+
+      - name: Build Library
+        working-directory: rust
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare Artifact
+        shell: bash
+        run: |
+          mkdir -p staging
+          # Determine the cargo output filename (Cargo replaces hyphens with underscores)
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            SRC="rust/target/${{ matrix.target }}/release/gd_desktop_caster.dll"
+            DST="staging/gd_desktop_caster.${{ matrix.name }}.dll"
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            SRC="rust/target/${{ matrix.target }}/release/libgd_desktop_caster.dylib"
+            DST="staging/libgd_desktop_caster.${{ matrix.name }}.dylib"
+          else
+            SRC="rust/target/${{ matrix.target }}/release/libgd_desktop_caster.so"
+            DST="staging/libgd_desktop_caster.${{ matrix.name }}.so"
+          fi
+          cp "$SRC" "$DST"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: binaries-${{ matrix.os_name }}
+          path: staging/*
+
+  package_and_release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: binaries-windows
+          path: addons/gd_desktop_caster/bin/
+          
+      - name: Download Linux Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: binaries-linux
+          path: addons/gd_desktop_caster/bin/
+          
+      - name: Download macOS Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: binaries-macos
+          path: addons/gd_desktop_caster/bin/
+
+      - name: Create Zip Archive
+        run: |
+          zip -r gd-desktop-caster.zip addons/
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: gd-desktop-caster.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
