@@ -21,8 +21,10 @@ windows = { version = ">=0.60, <=0.62", features = [
 screencapturekit = "1.5"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ashpd = { version = "0.13", features = ["pipewire"] }
+ashpd = { version = "0.13", features = ["pipewire", "tokio"] }
 pipewire = "0.9"
+tokio = { version = "1", features = ["rt", "macros"], default-features = false }
+x11rb = { version = "0.13", features = ["shm", "image"] }
 
 [profile.release]
 opt-level = 3

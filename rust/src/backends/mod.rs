@@ -38,4 +38,4 @@ pub type PlatformBackend = windows::DxgiCaptureBackend;
 #[cfg(target_os = "macos")]
 pub type PlatformBackend = macos::ScreenCaptureKitBackend;
 #[cfg(target_os = "linux")]
-pub type PlatformBackend = linux::PipeWireCaptureBackend;
+pub type PlatformBackend = linux::LinuxCaptureBackend;
