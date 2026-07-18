@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*' # Run automatically when a new tag like v1.0.0 is pushed
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
