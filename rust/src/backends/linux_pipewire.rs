@@ -3,12 +3,20 @@ use ashpd::desktop::screencast::{CursorMode, Screencast, SelectSourcesOptions, S
 use std::sync::mpsc;
 use std::time::Duration;
 
-// Note: pipewire and spa imports
-use pipewire::context::Context;
-use pipewire::main_loop::MainLoop;
-use pipewire::properties;
-use pipewire::stream::{Stream, StreamFlags};
-use spa::utils::Direction;
+// Note: pipewire-rs 0.9+ split MainLoop/Context/Stream into Rc-suffixed
+// (shared-ownership) and Box-suffixed (unique-ownership) variants; the bare
+// names no longer have a `new()` of their own. We construct the Rc variants
+// and rely on Deref to keep using the plain-type methods (.loop_(), .connect(), etc).
+// `spa` is re-exported by the pipewire crate itself (pipewire::spa), not a
+// separate top-level dependency.
+use pipewire::context::ContextRc;
+use pipewire::main_loop::MainLoopRc;
+// `pipewire::properties` is a *module*; the `properties!` macro of the same
+// name lives inside it and must be imported explicitly, or `use pipewire::properties;`
+// below will shadow the macro with the module.
+use pipewire::properties::properties;
+use pipewire::spa::utils::Direction;
+use pipewire::stream::{StreamFlags, StreamRc};
 
 /// Status message sent from worker thread to ensure stream connects 
 /// successfully before `init()` returns.
@@ -79,13 +87,16 @@ impl CaptureBackend for PipeWireCaptureBackend {
                 }
 
                 pipewire::init();
-                let mainloop = try_setup!(MainLoop::new(None), "Failed to create PipeWire mainloop");
-                let context =
-                    try_setup!(Context::new(&mainloop.loop_(), None), "Failed to create PipeWire context");
+                let mainloop =
+                    try_setup!(MainLoopRc::new(None), "Failed to create PipeWire mainloop");
+                let context = try_setup!(
+                    ContextRc::new(&mainloop, None),
+                    "Failed to create PipeWire context"
+                );
 
-                // Connect using portal FD. `connect_fd` takes ownership.
+                // Connect using portal FD. `connect_fd_rc` takes ownership of the fd.
                 let core = try_setup!(
-                    context.connect_fd(pw_fd, None),
+                    context.connect_fd_rc(pw_fd, None),
                     "Failed to connect to PipeWire via portal FD"
                 );
 
@@ -96,7 +107,7 @@ impl CaptureBackend for PipeWireCaptureBackend {
                 };
 
                 let stream = try_setup!(
-                    Stream::new(&core, "gd-capture", props),
+                    StreamRc::new(core, "gd-capture", props),
                     "Failed to create PipeWire stream"
                 );
 

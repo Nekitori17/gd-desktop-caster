@@ -15,7 +15,7 @@ impl CaptureBackend for LinuxCaptureBackend {
         // Try PipeWire / XDG Portal first (Wayland & modern X11)
         let pipewire_error = match pipewire::PipeWireCaptureBackend::init(width, height) {
             Ok(pw) => {
-                godot::log::godot_print!("Initialized Linux capture via PipeWire/XDG Portal");
+                godot::global::godot_print!("Initialized Linux capture via PipeWire/XDG Portal");
                 return Ok(Self::PipeWire(pw));
             }
             Err(error) => error,
@@ -24,7 +24,7 @@ impl CaptureBackend for LinuxCaptureBackend {
         // Fallback to X11 XGetImage
         let x11_error = match x11::X11CaptureBackend::init(width, height) {
             Ok(x11) => {
-                godot::log::godot_print!("Initialized Linux capture via X11 fallback");
+                godot::global::godot_print!("Initialized Linux capture via X11 fallback");
                 return Ok(Self::X11(x11));
             }
             Err(error) => error,
