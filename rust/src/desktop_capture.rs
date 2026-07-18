@@ -106,8 +106,9 @@ impl INode for DesktopCapture {
         self.frame_ready.store(false, Ordering::Release);
         self.control.notify();
 
-        // Reuse the ImageTexture allocation. Godot still needs an upload for
-        // every completed frame, but no texture object is recreated here.
+        // Reuse ImageTexture object to avoid recreation, though PackedByteArray
+        // still allocates per frame due to gdext lacking in-place updates.
+        // TODO: Revisit if gdext adds support for writing into existing arrays.
         if let Some(ref mut image) = self.image {
             let byte_array = PackedByteArray::from(front.as_slice());
 
@@ -139,6 +140,12 @@ impl DesktopCapture {
     pub fn start(&mut self) -> bool {
         if self.is_running.load(Ordering::Relaxed) {
             return true;
+        }
+
+        // Explicitly join any previous worker that stopped on its own (e.g.
+        // on a fatal error) to prevent unexpected blocking during Drop.
+        if self.capture_thread.is_some() {
+            self.stop();
         }
 
         let screen_size = DisplayServer::singleton()

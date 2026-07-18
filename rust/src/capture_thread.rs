@@ -10,7 +10,12 @@ use crate::desktop_capture::FpsMode;
 
 const MIN_MANUAL_FPS: u32 = 1;
 const MAX_MANUAL_FPS: u32 = 240;
-const VSYNC_STOP_POLL: Duration = Duration::from_millis(50);
+/// How long the worker sleeps between checks while waiting for Godot to
+/// consume a completed frame (front/back swap hasn't happened yet).
+const FRAME_CONSUMED_POLL: Duration = Duration::from_millis(50);
+/// Timeout passed to the backend's OS frame wait in Vsync mode. Bounded so
+/// the worker still wakes up periodically to check for shutdown/mode changes.
+const VSYNC_ACQUIRE_TIMEOUT: Duration = Duration::from_millis(50);
 const ERROR_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// State shared by the Godot main thread and the capture worker.
@@ -109,6 +114,13 @@ impl CaptureControl {
     }
 }
 
+/// Frame interval for Manual mode. `target_fps` is always clamped to
+/// `1..=MAX_MANUAL_FPS` before reaching here, so the division is never by
+/// zero and never produces a degenerate (near-zero) interval.
+fn manual_frame_interval(target_fps: u32) -> Duration {
+    Duration::from_secs_f64(1.0 / f64::from(target_fps))
+}
+
 pub struct CaptureThread {
     handle: Option<JoinHandle<()>>,
     is_running: Arc<AtomicBool>,
@@ -167,14 +179,22 @@ impl CaptureThread {
         let mut previous_mode = control.fps_mode();
         let mut next_manual_frame = Instant::now();
 
-        let buf_size = (width * height * 4) as usize;
-        let mut local_buffer = vec![0u8; buf_size];
+        // Cache target FPS to avoid repeated float division in the hot path.
+        let mut cached_target_fps = control.target_fps();
+        let mut frame_interval = manual_frame_interval(cached_target_fps);
+
+        // Lazily allocated scratch buffer for Vsync mode to avoid holding the
+        // back_buffer lock during OS waits.
+        let buf_size = (width as usize)
+            .saturating_mul(height as usize)
+            .saturating_mul(4);
+        let mut vsync_scratch: Vec<u8> = Vec::new();
 
         while is_running.load(Ordering::Acquire) {
             // Keep only the latest frame. Capturing while Godot still owns a
             // complete frame wastes GPU readback and increases latency.
             if frame_ready.load(Ordering::Acquire) {
-                control.wait(VSYNC_STOP_POLL);
+                control.wait(FRAME_CONSUMED_POLL);
                 continue;
             }
 
@@ -186,8 +206,12 @@ impl CaptureThread {
 
             let timeout_ms = match fps_mode {
                 FpsMode::Manual => {
-                    let frame_interval =
-                        Duration::from_secs_f64(1.0 / f64::from(control.target_fps()));
+                    let target_fps = control.target_fps();
+                    if target_fps != cached_target_fps {
+                        cached_target_fps = target_fps;
+                        frame_interval = manual_frame_interval(target_fps);
+                    }
+
                     let now = Instant::now();
                     if now < next_manual_frame {
                         control.wait(next_manual_frame - now);
@@ -200,20 +224,33 @@ impl CaptureThread {
                     }
                     0
                 }
-                FpsMode::Vsync => VSYNC_STOP_POLL.as_millis() as u32,
+                FpsMode::Vsync => VSYNC_ACQUIRE_TIMEOUT.as_millis() as u32,
             };
-
-            // Capture into local scratch buffer (no locks held during block).
-            let capture_result = backend.capture_frame(local_buffer.as_mut_slice(), timeout_ms);
+            // Manual mode (timeout=0): Capture directly to back_buffer under lock
+            // to avoid memcpy, as there's no OS wait.
+            // Vsync mode: Capture to scratch buffer first to avoid holding the lock
+            // during OS wait, which would block Godot's main thread swap.
+            let capture_result = if timeout_ms == 0 {
+                let mut back = back_buffer
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                backend.capture_frame(back.as_mut_slice(), 0)
+            } else {
+                if vsync_scratch.len() != buf_size {
+                    vsync_scratch = vec![0u8; buf_size];
+                }
+                let result = backend.capture_frame(vsync_scratch.as_mut_slice(), timeout_ms);
+                if let Ok(true) = result {
+                    let mut back = back_buffer
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    back.copy_from_slice(&vsync_scratch);
+                }
+                result
+            };
 
             match capture_result {
                 Ok(true) => {
-                    {
-                        let mut back = back_buffer
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        back.copy_from_slice(&local_buffer);
-                    }
                     control.clear_error();
                     frame_ready.store(true, Ordering::Release);
                 }

@@ -200,26 +200,35 @@ impl CaptureBackend for DxgiCaptureBackend {
                     texture: &self.staging_texture,
                 };
 
-                let src = mapped.pData as *const u8;
                 let width = self.width as usize;
                 let dst_stride = width * 4;
                 let pitch = mapped.RowPitch as usize;
 
-                for row in 0..self.height as usize {
-                    // Create safe slices for this row
-                    let src_slice = std::slice::from_raw_parts(src.add(row * pitch), dst_stride);
-                    let dst_slice = &mut buffer[row * dst_stride..row * dst_stride + dst_stride];
-                    
-                    // Safely cast [u8] to [u32] for bulk processing. 
-                    // LLVM auto-vectorizes this zip loop into fast SIMD instructions.
-                    let (_, src_u32, _) = src_slice.align_to::<u32>();
-                    let (_, dst_u32, _) = dst_slice.align_to_mut::<u32>();
+                // Pitch can exceed width * 4 due to padding, but must not be
+                // smaller to prevent out-of-bounds reads.
+                if pitch < dst_stride {
+                    return Err(CaptureError::Reinitialize(format!(
+                        "Mapped row pitch ({pitch}) is smaller than expected stride ({dst_stride}); \
+                         output size no longer matches the display"
+                    )));
+                }
 
-                    for (d, s) in dst_u32.iter_mut().zip(src_u32.iter()) {
-                        let bgra = *s;
-                        *d = (bgra & 0xff00_ff00)
-                            | ((bgra & 0x00ff_0000) >> 16)
-                            | ((bgra & 0x0000_00ff) << 16);
+                let mapped_len = pitch
+                    .checked_mul(self.height as usize)
+                    .ok_or_else(|| CaptureError::Fatal("Mapped resource size overflows usize".to_owned()))?;
+                let src_all = std::slice::from_raw_parts(mapped.pData as *const u8, mapped_len);
+
+                // BGRA -> RGBA swizzle. Uses plain byte copy because GPU buffer
+                // alignment isn't guaranteed; LLVM vectorizes this efficiently.
+                for row in 0..self.height as usize {
+                    let src_row = &src_all[row * pitch..row * pitch + dst_stride];
+                    let dst_row = &mut buffer[row * dst_stride..row * dst_stride + dst_stride];
+
+                    for (d, s) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+                        d[0] = s[2]; // R <- B
+                        d[1] = s[1]; // G
+                        d[2] = s[0]; // B <- R
+                        d[3] = s[3]; // A
                     }
                 }
                 Ok(())
