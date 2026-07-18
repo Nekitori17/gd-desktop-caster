@@ -7,6 +7,8 @@
 
 **GD Desktop Caster** is a high-performance, cross-platform Godot 4.x GDExtension for real-time desktop screen capture. Written entirely in **Rust**, it utilizes native OS-level APIs to achieve minimal latency and zero overhead on Godot's main rendering thread.
 
+![Thumbnail](assets/thumbnail.png)
+
 ---
 
 ## 📖 Table of Contents
