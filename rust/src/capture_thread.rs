@@ -6,7 +6,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::backends::{CaptureBackend, CaptureError, PlatformBackend};
-use crate::desktop_capture::FpsMode;
+use crate::desktop_caster::FpsMode;
 
 const MIN_MANUAL_FPS: u32 = 1;
 const MAX_MANUAL_FPS: u32 = 240;

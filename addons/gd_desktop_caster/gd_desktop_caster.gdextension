@@ -7,3 +7,6 @@ reloadable = false
 windows.x86_64 = "res://addons/gd_desktop_caster/bin/gd_desktop_caster.windows.release.x86_64.dll"
 macos.universal = "res://addons/gd_desktop_caster/bin/libgd_desktop_caster.macos.release.universal.dylib"
 linux.x86_64 = "res://addons/gd_desktop_caster/bin/libgd_desktop_caster.linux.release.x86_64.so"
+
+[icons]
+DesktopCaster = "res://addons/gd_desktop_caster/desktop_caster.svg"

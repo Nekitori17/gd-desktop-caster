@@ -32,7 +32,7 @@ impl FpsMode {
 
 #[derive(GodotClass)]
 #[class(base = Node)]
-pub struct DesktopCapture {
+pub struct DesktopCaster {
     base: Base<Node>,
 
     #[export]
@@ -58,7 +58,7 @@ pub struct DesktopCapture {
 }
 
 #[godot_api]
-impl INode for DesktopCapture {
+impl INode for DesktopCaster {
     fn init(base: Base<Node>) -> Self {
         Self {
             base,
@@ -134,7 +134,7 @@ impl INode for DesktopCapture {
 }
 
 #[godot_api]
-impl DesktopCapture {
+impl DesktopCaster {
     /// Start capture. Manual mode defaults to 30 FPS.
     #[func]
     pub fn start(&mut self) -> bool {
@@ -156,7 +156,7 @@ impl DesktopCapture {
             (Ok(width), Ok(height)) if width > 0 && height > 0 => (width, height),
             _ => {
                 self.control
-                    .report_error("[DesktopCapture] Primary display has an invalid size.");
+                    .report_error("[DesktopCaster] Primary display has an invalid size.");
                 return false;
             }
         };
@@ -165,7 +165,7 @@ impl DesktopCapture {
             .and_then(|pixels| pixels.checked_mul(4))
         else {
             self.control
-                .report_error("[DesktopCapture] Capture buffer size overflows this platform.");
+                .report_error("[DesktopCaster] Capture buffer size overflows this platform.");
             return false;
         };
 
@@ -222,7 +222,7 @@ impl DesktopCapture {
             Err(error) => {
                 self.is_running.store(false, Ordering::Release);
                 self.control
-                    .report_error(format!("[DesktopCapture] {error}"));
+                    .report_error(format!("[DesktopCaster] {error}"));
                 false
             }
         }
