@@ -18,10 +18,14 @@
   - [🌍 Platform Support](#-platform-support)
   - [🧠 Architecture \& Performance](#-architecture--performance)
   - [🛠 Usage in Godot](#-usage-in-godot)
-    - [1. The `DesktopCapture` Node](#1-the-desktopcapture-node)
+    - [1. The `DesktopCaster` Node](#1-the-desktopcaster-node)
     - [2. Usage Examples (GDScript \& C#)](#2-usage-examples-gdscript--c)
       - [GDScript](#gdscript)
       - [C#](#c)
+  - [📚 API Reference](#-api-reference)
+    - [Properties](#properties)
+    - [Methods](#methods)
+    - [Enumerations \& Constants](#enumerations--constants)
   - [🏗 Building from Source](#-building-from-source)
     - [Prerequisites](#prerequisites)
     - [Windows](#windows)
@@ -69,7 +73,7 @@ graph LR
     end
 
     subgraph Godot[Godot Main Thread]
-        Node[DesktopCapture Node]
+        Node[DesktopCaster Node]
         Tex[ImageTexture Update]
         Node --> Tex
     end
@@ -80,7 +84,7 @@ graph LR
 
 1. **OS API** delivers the frame to our **Worker Thread**.
 2. The Worker converts the color space (e.g., `BGRx` -> `RGBA`) into a hidden `local_buffer`.
-3. When Godot calls `_process()` and requests a frame, we simply **swap** the pointers of the `local_buffer` and `front_buffer` in a microsecond.
+3. When Godot updates, the texture is updated in-place without blocking the main render loop.
 
 ---
 
@@ -88,57 +92,92 @@ graph LR
 
 Using the plugin in your Godot project is as simple as adding a Node.
 
-### 1. The `DesktopCapture` Node
-Once the plugin is installed, a new custom node called `DesktopCapture` will be available in Godot. Add it to your scene.
+### 1. The `DesktopCaster` Node
+Once the plugin is installed, a new custom node called `DesktopCaster` will be available in Godot. Add it to your scene.
 
 ### 2. Usage Examples (GDScript & C#)
 
-You can easily route the captured screen to any `TextureRect` or 3D Material:
+Assign the live texture once during initialization — the texture updates in-place, so there is no need to reassign it in `_process()`.
 
 #### GDScript
 ```gdscript
 extends Control
 
-@onready var desktop_capture: DesktopCapture = $DesktopCapture
-@onready var texture_rect: TextureRect = $TextureRect
+@onready var caster: DesktopCaster = $DesktopCaster
+@onready var rect: TextureRect = $TextureRect
 
 func _ready():
-    # Optional: Configure capture settings
-    pass
-
-func _process(_delta: float):
-    # Check if a new frame has been delivered by the background thread
-    if desktop_capture.is_frame_ready():
-        # Apply the high-performance ImageTexture directly to our UI
-        texture_rect.texture = desktop_capture.get_texture()
+    # Start capturing
+    if caster.start():
+        # Assign the live texture once
+        rect.texture = caster.get_texture()
+    else:
+        print("Failed to start capture: ", caster.get_last_error())
 ```
 
 #### C#
+Since custom GDExtension classes are dynamically bound, call methods on the node using `Call(...)`:
+
 ```csharp
 using Godot;
 
 public partial class CaptureView : Control
 {
-    private DesktopCapture _desktopCapture;
+    private Node _caster;
     private TextureRect _textureRect;
 
     public override void _Ready()
     {
-        _desktopCapture = GetNode<DesktopCapture>("DesktopCapture");
+        _caster = GetNode<Node>("DesktopCaster");
         _textureRect = GetNode<TextureRect>("TextureRect");
-    }
 
-    public override void _Process(double delta)
-    {
-        // Check if a new frame has been delivered by the background thread
-        if (_desktopCapture.IsFrameReady())
+        // Call start() via Call()
+        bool success = (bool)_caster.Call("start");
+        if (success)
         {
-            // Apply the high-performance ImageTexture directly to our UI
-            _textureRect.Texture = _desktopCapture.GetTexture();
+            // Get texture and assign it to TextureRect
+            var texture = _caster.Call("get_texture").As<ImageTexture>();
+            _textureRect.Texture = texture;
+        }
+        else
+        {
+            string error = (string)_caster.Call("get_last_error");
+            GD.PrintErr($"Failed to start capture: {error}");
         }
     }
 }
 ```
+
+---
+
+## 📚 API Reference
+
+### Properties
+
+| Name | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `fps_mode` | `int` ([`FpsMode`](#enumerations--constants)) | `0` (`MANUAL`) | Controls how the capture rate is determined (`MANUAL` or `VSYNC`). |
+| `target_fps` | `int` | `30` | Target frame rate when `fps_mode` is set to `MANUAL` (clamped between 1..240). |
+
+### Methods
+
+| Return Type | Method & Description |
+| :--- | :--- |
+| `bool` | **`start()`**<br>Starts desktop capture on a background thread. Automatically detects primary display size. Returns `true` on success. |
+| `void` | **`stop()`**<br>Stops desktop capture and joins the background thread. Called automatically when exiting scene tree. |
+| `ImageTexture` | **`get_texture()`**<br>Returns the live `ImageTexture` updated each frame. Returns `null` if capture has not started. |
+| `bool` | **`is_capturing()`**<br>Returns `true` if the capture thread is currently running. |
+| `String` | **`get_last_error()`**<br>Returns the last error message reported by the capture thread, or empty string if no error. |
+| `void` | **`set_fps_mode_runtime(mode: int)`**<br>Changes the FPS mode while capture is running without restarting the thread. |
+| `void` | **`set_target_fps_runtime(target_fps: int)`**<br>Changes target frame rate while capture is running (for `MANUAL` mode). |
+
+### Enumerations & Constants
+
+**`enum FpsMode`**:
+| Constant | Value | Description |
+| :--- | :--- | :--- |
+| **`MANUAL`** | `0` | Capture at a user-selected rate specified by `target_fps`. |
+| **`VSYNC`** | `1` | Capture whenever the OS compositor presents a new frame for maximum smoothness. |
 
 ---
 

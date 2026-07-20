@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="DesktopCaster" inherits="Node" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Captures the primary display in real-time as a texture.
+	</brief_description>
+	<description>
+		A node that captures the primary display in real-time using native OS APIs and exposes it as an [ImageTexture].
+		[b]Basic usage:[/b]
+		[codeblock]
+		@onready var caster: DesktopCaster = $DesktopCaster
+		@onready var rect: TextureRect = $TextureRect
+
+		func _ready():
+		    if caster.start():
+		        rect.texture = caster.get_texture()
+		[/codeblock]
+		[b]Platform support:[/b] Windows (DXGI Desktop Duplication), Linux (PipeWire/XDG Portal with X11 fallback), macOS (planned).
+	</description>
+	<methods>
+		<method name="start">
+			<return type="bool" />
+			<description>
+				Starts desktop capture on a background thread. Automatically detects primary display size.
+				Returns [code]true[/code] on success. If capture is already running, returns [code]true[/code] immediately.
+				On failure the error message is accessible via [method get_last_error] and also printed to the Godot output panel.
+				[codeblock]
+				if not caster.start():
+				    print(caster.get_last_error())
+				[/codeblock]
+			</description>
+		</method>
+		<method name="stop">
+			<return type="void" />
+			<description>
+				Stops desktop capture and joins the background thread. Called automatically when the node exits the scene tree. Safe to call even if capture is not running.
+			</description>
+		</method>
+		<method name="get_texture">
+			<return type="ImageTexture" />
+			<description>
+				Returns the live [ImageTexture] updated each frame by the capture thread. Assign this once to a [TextureRect] — no need to reassign every frame, because the texture is updated in-place.
+				[codeblock]
+				func _ready():
+				    caster.start()
+				    $TextureRect.texture = caster.get_texture()
+				[/codeblock]
+				Returns [code]null[/code] if [method start] has not been called yet.
+			</description>
+		</method>
+		<method name="is_capturing">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the capture thread is currently running.
+			</description>
+		</method>
+		<method name="get_last_error">
+			<return type="String" />
+			<description>
+				Returns the last error message reported by the capture thread, or an empty string if no error has occurred since [method start] was called.
+			</description>
+		</method>
+		<method name="set_fps_mode_runtime">
+			<return type="void" />
+			<param index="0" name="mode" type="int" />
+			<description>
+				Changes the [enum FpsMode] while capture is already running. The change takes effect immediately without restarting the capture thread.
+				[codeblock]
+				caster.set_fps_mode_runtime(DesktopCaster.FpsMode.VSYNC)
+				[/codeblock]
+			</description>
+		</method>
+		<method name="set_target_fps_runtime">
+			<return type="void" />
+			<param index="0" name="target_fps" type="int" />
+			<description>
+				Changes the target frame rate while capture is already running. Only meaningful when [member fps_mode] is [constant FpsMode.MANUAL]. Values outside the range [code]1..240[/code] are clamped to [code]30[/code] to prevent a busy-polling loop.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="fps_mode" type="int" setter="set_fps_mode" getter="get_fps_mode" enum="DesktopCaster.FpsMode" default="0">
+			Controls how the capture rate is determined. Use [constant FpsMode.MANUAL] to set a fixed FPS, or [constant FpsMode.VSYNC] to sync with the OS compositor.
+		</member>
+		<member name="target_fps" type="int" setter="set_target_fps" getter="get_target_fps" default="30">
+			Target frame rate when [member fps_mode] is [constant FpsMode.MANUAL]. Values outside [code]1..240[/code] are clamped to [code]30[/code].
+		</member>
+	</members>
+	<constants>
+		<constant name="MANUAL" value="0" enum="FpsMode">
+			Capture at a user-selected rate (see [member target_fps]). The default is 30 FPS.
+		</constant>
+		<constant name="VSYNC" value="1" enum="FpsMode">
+			Capture every time the OS compositor presents a new frame. Gives the smoothest result but may produce more frames than Godot can display.
+		</constant>
+	</constants>
+</class>
